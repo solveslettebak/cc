@@ -180,17 +180,17 @@ architecture Behavioral of main is
     constant CLOCK_DELAY : integer := (CLOCK_SPEED/1_000_000)*INIT_DELAY_us;
     
     type t_state is (
-        INIT, 
-        WAIT_PGVA, 
-        DELAY, 
-        READ_EEPROM, 
-        CHECK, 
-        PLL_SETUP_NEXT, 
-        STEP_ATTENUATOR_PROGRAM, 
-        WRITE_PLL, 
-        WAIT_FOR_LOCK, 
-        MONITOR, 
-        ERROR
+        INIT, 			  -- Initialize
+        WAIT_PGVA, 		  -- Wait for power good signals
+        DELAY, 			  -- Wait for INIT_DELAY_us before continuing
+        READ_EEPROM, 	  -- Read RF frequency, step attenuator settings and PLL registers from EEPROM
+        CHECK, 			  -- Check RF frequency is 352 or 704 (also to verify good read of EEPROM)
+        STEP_ATT_PROGRAM, -- Program step attenuator
+        PLL_SETUP_NEXT,   -- Set up first/next register to write to external PLL
+        WRITE_PLL, 		  -- Write one register. Return to PLL_SETUP_NEXT, or WAIT_FOR_LOCK if all registers are written
+        WAIT_FOR_LOCK, 	  -- Wait for PLL lock (and verify power still good)
+        MONITOR, 		  -- Setup is done - monitor power and PLL lock
+        ERROR			  -- All errors goes here. Requires a reset signal to get out of this.
     );
     signal state : t_state := INIT;
     
@@ -199,10 +199,6 @@ architecture Behavioral of main is
     signal reg_counter : integer := 0;
     signal stp_att_counter : integer := 0;
     signal r_stp_att_counter : integer := 0;
-    
-    signal clockDivCount : integer := 0;
-    
-
 
 begin
 
@@ -326,18 +322,18 @@ begin
 							when 704 =>
 								LED_704 <= '1';
 								LED_352 <= '0';
-								state <= STEP_ATTENUATOR_PROGRAM;
+								state <= STEP_ATT_PROGRAM;
 							when 352 =>
 								LED_704 <= '0';
 								LED_352 <= '1';
-								state <= STEP_ATTENUATOR_PROGRAM;
+								state <= STEP_ATT_PROGRAM;
 							when others =>
 								LED_704 <= '1';
 								LED_352 <= '1';    
 								state <= ERROR; 
 						end case;
 						
-					when STEP_ATTENUATOR_PROGRAM => -- need to test this. verify it is written in the correct order, for starters.
+					when STEP_ATT_PROGRAM => -- need to test this. verify it is written in the correct order, for starters.
 						stp_att_counter <= r_stp_att_counter; 
 						StpAtnD0 <= r_stp_att(0);
 						StpAtnD1 <= r_stp_att(1);
