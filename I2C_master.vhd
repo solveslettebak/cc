@@ -53,7 +53,6 @@ END i2c_master;
 
 ARCHITECTURE logic OF i2c_master IS
   CONSTANT divider  :  INTEGER := (input_clk/bus_clk)/4; --number of clocks in 1/4 cycle of scl
-  --CONSTANT divider  :  INTEGER := 10; --number of clocks in 1/4 cycle of scl-------------------------------------------------------------------------------------- FIX THIS
   TYPE machine IS(ready, start, command, slv_ack1, wr, rd, slv_ack2, mstr_ack, stop); --needed states
   SIGNAL state         : machine;                        --state machine
   SIGNAL data_clk      : STD_LOGIC;                      --data clock for sda

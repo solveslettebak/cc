@@ -18,10 +18,6 @@
 -- 
 ----------------------------------------------------------------------------------
 
-
-
-
-
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 
@@ -30,59 +26,44 @@ use work.LED_constants.all;
 
 entity read_registers is
 
-generic (
-    g_CLOCK_SPEED   : integer := 300_000_000; -- Hz
-    g_BUS_SPEED     : integer := 400_000);
-port ( 
-    clock      : in  std_logic;
-    reset      : in  std_logic;   
-    read_next  : in  std_logic;
-    data_ready : out std_logic;
+    generic (
+        g_CLOCK_SPEED   : integer := 300_000_000; -- Hz
+        g_BUS_SPEED     : integer := 400_000);
+    port ( 
+        clock      : in  std_logic;
+        reset      : in  std_logic;   
+        read_next  : in  std_logic;
+        data_ready : out std_logic;
     
-    o_RF_freq  : out std_logic_vector(15 downto 0);
-    o_stp_att  : out std_logic_vector( 7 downto 0);
-    o_regs     : out t_mem_registers;
+        o_RF_freq  : out std_logic_vector(15 downto 0);
+        o_stp_att  : out std_logic_vector( 7 downto 0);
+        o_regs     : out t_mem_registers;
         
-    sda        : inout std_logic;
-    scl        : inout std_logic );
+        sda        : inout std_logic;
+        scl        : inout std_logic
+     );
+     
 end read_registers;
 
+
 architecture Behavioral of read_registers is    
+  
+    -- inputs/outputs for I2C master --
+    signal reset_n       : std_logic := '1';
+    signal I2C_ena       : std_logic := '0';
+    signal I2C_addr      : std_logic_vector(6 downto 0);
+    signal I2C_rw        : std_logic := '1';
+    signal I2C_data_wr   : std_logic_vector(7 downto 0);
+    signal I2C_busy      : std_logic := '0';
+    signal I2C_data_rd   : std_logic_vector(7 downto 0);
+    signal I2C_ack_error : std_logic;
+    -----------------------------------
     
-  component I2C_master
-  GENERIC(
-    input_clk : INTEGER; --input clock speed from user logic in Hz
-    bus_clk   : INTEGER);   --speed the i2c bus (scl) will run at in Hz
-  PORT(
-    clk       : IN     STD_LOGIC;                    --system clock
-    reset_n   : IN     STD_LOGIC;                    --active low reset
-    ena       : IN     STD_LOGIC;                    --latch in command
-    addr      : IN     STD_LOGIC_VECTOR(6 DOWNTO 0); --address of target slave
-    rw        : IN     STD_LOGIC;                    --'0' is write, '1' is read
-    data_wr   : IN     STD_LOGIC_VECTOR(7 DOWNTO 0); --data to write to slave
-    busy      : OUT    STD_LOGIC;                    --indicates transaction in progress
-    data_rd   : OUT    STD_LOGIC_VECTOR(7 DOWNTO 0); --data read from slave
-    ack_error : BUFFER STD_LOGIC;                    --flag if improper acknowledge from slave
-    sda       : INOUT  STD_LOGIC;                    --serial data output of i2c bus
-    scl       : INOUT  STD_LOGIC);                   --serial clock output of i2c bus 
-  end component;
+    signal r_I2C_data_rd : std_logic_vector(7 downto 0);
+    signal r_I2C_busy    : std_logic  := '0';
   
-  signal reset_n : std_logic := '1';
-  signal I2C_ena : std_logic := '0';
-  signal I2C_addr : std_logic_vector(6 downto 0);
-  signal I2C_rw   : std_logic := '1';
-  signal I2C_data_wr : std_logic_vector(7 downto 0);
-  signal I2C_busy    : std_logic;
-  signal I2C_data_rd : std_logic_vector(7 downto 0);
-  signal I2C_ack_error : std_logic;
-  
-  signal r_I2C_data_rd : std_logic_vector(7 downto 0);
-  signal r_I2C_busy    : std_logic;
-  
-  signal busy_prev : std_logic;
-  
--------------------------------------------  
-    
+    signal busy_prev     : std_logic := '0';
+      
     signal eeprom_mem : std_logic_vector(27 * 8 - 1 downto 0);
     alias mem_RF_freq : std_logic_vector(15 downto 0) is eeprom_mem( 2 * 8 - 1 downto  0 * 8);
     alias mem_stp_att : std_logic_vector( 7 downto 0) is eeprom_mem( 3 * 8 - 1 downto  2 * 8);    
@@ -105,8 +86,6 @@ architecture Behavioral of read_registers is
         
     signal registers : t_mem_registers;
     
-    signal reg_count : integer := 0;
-    
     type t_state is ( 
         WAITING,            
         READ_EEPROM,
@@ -117,17 +96,18 @@ architecture Behavioral of read_registers is
     constant control_code : std_logic_vector(3 downto 0) := "1010";
     constant address_chip : std_logic_vector(2 downto 0) := "000";
 
-    signal busy_cnt   : integer := 0;
-    signal r_busy_cnt : integer := 0;
+    signal busy_cnt    : integer range 0 to 31 := 0; 
+    signal r_busy_cnt  : integer range 0 to 31 := 0; 
+    signal r_read_next : std_logic := '0';
 
 begin
 
     reset_n <= not reset;
     
-    memory_reader : I2C_master
+    memory_reader : entity work.I2C_master
     generic map (
         input_clk => g_CLOCK_SPEED,
-        bus_clk   => 100_000          --- 10kOhm resistors used, therefore 100kHz, ref. datasheet.
+        bus_clk   => g_BUS_SPEED    
     )
     port map (
         clk       => clock,
@@ -155,15 +135,18 @@ begin
             r_eeprom_mem <= eeprom_mem;
             I2C_data_rd <= r_I2C_data_rd;
             I2C_busy    <= r_I2C_busy;
+            
+            r_read_next <= read_next;
         end if;
     end process mem_proc;
     
-    SM_read_eeprom : process(clock) 
+    SM_read_registers : process(clock) 
     begin
         if rising_edge(clock) then
 			if reset = '1' then
 				state <= WAITING;
 				I2C_ena <= '0';
+				busy_prev <= '0';
 			else
 
 				case state is 
@@ -171,7 +154,7 @@ begin
 						data_ready <= '0';
 						busy_cnt <= 0;
 
-						if read_next = '1' then
+						if r_read_next = '1' then
 							state <= READ_EEPROM;
 						end if;
 						
@@ -232,7 +215,7 @@ begin
 							when 22 => if I2C_busy = '0' then mem_reg_4(31 downto 24) <= I2C_data_rd; end if;
 							when 23 => if I2C_busy = '0' then mem_reg_4(23 downto 16) <= I2C_data_rd; end if;
 							when 24 => if I2C_busy = '0' then mem_reg_4(15 downto  8) <= I2C_data_rd; end if;         
-							when 25 => if I2C_busy = '0' then mem_reg_4( 7 downto  0) <= I2C_data_rd; end if;         
+							when 25 => if I2C_busy = '0' then mem_reg_4( 7 downto  0) <= I2C_data_rd; end if;
 
 							-- PLL register 5
 							when 26 => if I2C_busy = '0' then mem_reg_5(31 downto 24) <= I2C_data_rd; end if;
@@ -255,5 +238,5 @@ begin
 				end case;
 			end if;
         end if;
-    end process SM_read_eeprom;
+    end process SM_read_registers;
 end Behavioral;

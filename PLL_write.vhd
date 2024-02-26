@@ -23,10 +23,14 @@ architecture Behavioral of PLL_write is
 
 	constant CLOCK_DIVIDE : integer := (CLOCK_SPEED / PLL_CLOCK_SPEED) / 4;
 
-    type t_state is (WAITING, WRITING, DONE);
+    type t_state is (
+        WAITING, 
+        WRITING, 
+        DONE
+    );
     signal state : t_state := WAITING;
 
-    signal write_count : integer := 0;
+    signal write_count : integer range 0 to REG_WIDTH - 1 := 0;
     signal data_clock : std_logic;
     signal last_data_clock : std_logic;
 
@@ -34,6 +38,7 @@ architecture Behavioral of PLL_write is
 
     signal r_data : std_logic_vector(REG_WIDTH - 1 downto 0);
     signal r_LE   : std_logic := '1';
+    signal r_write_en : std_logic := '0';
 
     signal clock_count : integer range 0 to CLOCK_DIVIDE * 4;
 
@@ -79,28 +84,34 @@ begin
         end if;
     end process clock_gen;
 
-    SM : process(i_clock) begin
+    SM : process(i_clock) 
+    
+        procedure proc_reset is begin
+            r_LE <= '1';
+            o_write_done <= '0';
+            write_count <= 0;
+        end proc_reset;    
+        
+    begin
         if rising_edge(i_clock) then
 
 			if i_reset = '1' then
-				r_LE <= '1';
-				o_write_done <= '0';
-				write_count <= 0;
+			    proc_reset;
 			else
 
 				case state is
 				
 					when WAITING =>
-					
-						if i_write_en = '1' then
+					    
+					    r_write_en <= i_write_en;
+					    
+						if r_write_en = '1' then
 							state <= WRITING;
 							write_count <= REG_WIDTH - 1;
 							r_data <= i_data;
 							r_LE <= '0';
 						else
-							r_LE <= '1';
-							o_write_done <= '0';
-							write_count <= 0;
+						    proc_reset;
 						end if;
 						
 					when WRITING =>
@@ -129,5 +140,6 @@ begin
     
     o_clock <= PLL_clock;
     o_LE <= r_LE;
+    
 
 end Behavioral;
