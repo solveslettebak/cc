@@ -1,20 +1,13 @@
 ----------------------------------------------------------------------------------
--- Company: 
--- Engineer: 
--- 
--- Create Date: 11/08/2023 07:50:26 PM
--- Design Name: 
--- Module Name: read_registers - Behavioral
--- Project Name: 
--- Target Devices: 
--- Tool Versions: 
--- Description: 
--- 
--- Dependencies: 
--- 
--- Revision:
--- Revision 0.01 - File Created
--- Additional Comments:
+-- Company: European Spallation Source
+-- Engineer: Sølve Slettebak
+--  
+-- Module Name:    read_registers - Behavioral
+-- Project Name:   Firmware for HQF  
+-- Target Devices: Cmod S7-25 (xc7s25csga225-1)
+-- Tool Versions:  Vivado 2023.1
+--
+-- Description: Read data from EEPROM over I2C.
 -- 
 ----------------------------------------------------------------------------------
 
@@ -27,18 +20,20 @@ use work.LED_constants.all;
 entity read_registers is
 
     generic (
-        g_CLOCK_SPEED   : integer := 300_000_000; -- Hz
-        g_BUS_SPEED     : integer := 400_000);
+        g_CLOCK_SPEED   : integer := 220_000_000; -- Hz
+        g_BUS_SPEED     : integer := 100_000);    -- Hz
     port ( 
         clock      : in  std_logic;
         reset      : in  std_logic;   
-        read_next  : in  std_logic;
-        data_ready : out std_logic;
-    
+        read_next  : in  std_logic; -- Read from EEPROM starts when this goes high.
+        data_ready : out std_logic; -- Goes high for 1 clock cycle when data is latched on output
+        
+        -- Data output
         o_RF_freq  : out std_logic_vector(15 downto 0);
         o_stp_att  : out std_logic_vector( 7 downto 0);
         o_regs     : out t_mem_registers;
         
+        -- I2C signals (data, clock)
         sda        : inout std_logic;
         scl        : inout std_logic
      );
@@ -59,13 +54,17 @@ architecture Behavioral of read_registers is
     signal I2C_ack_error : std_logic;
     -----------------------------------
     
+    -- double registered for timing closure
     signal r_I2C_data_rd : std_logic_vector(7 downto 0);
     signal r_I2C_busy    : std_logic  := '0';
   
     signal busy_prev     : std_logic := '0';
       
+    -- to contain the 27 bytes to read from EEPROM
     signal eeprom_mem : std_logic_vector(27 * 8 - 1 downto 0);
-    alias mem_RF_freq : std_logic_vector(15 downto 0) is eeprom_mem( 2 * 8 - 1 downto  0 * 8);
+    
+    -- Aliases to map the RF frequency, step attenuator byte, and PLL registers of the eeprom_mem signal. 
+    alias mem_RF_freq : std_logic_vector(15 downto 0) is eeprom_mem( 2 * 8 - 1 downto  0 * 8); 
     alias mem_stp_att : std_logic_vector( 7 downto 0) is eeprom_mem( 3 * 8 - 1 downto  2 * 8);    
     alias mem_reg_0   : std_logic_vector(31 downto 0) is eeprom_mem( 7 * 8 - 1 downto  3 * 8);
     alias mem_reg_1   : std_logic_vector(31 downto 0) is eeprom_mem(11 * 8 - 1 downto  7 * 8);
@@ -74,6 +73,7 @@ architecture Behavioral of read_registers is
     alias mem_reg_4   : std_logic_vector(31 downto 0) is eeprom_mem(23 * 8 - 1 downto 19 * 8);
     alias mem_reg_5   : std_logic_vector(31 downto 0) is eeprom_mem(27 * 8 - 1 downto 23 * 8);
 
+    -- eeprom_mem (and aliases) double registered for timing closure.
     signal r_eeprom_mem : std_logic_vector(27 * 8 - 1 downto 0);
     alias r_mem_RF_freq : std_logic_vector(15 downto 0) is r_eeprom_mem( 2 * 8 - 1 downto  0 * 8);
     alias r_mem_stp_att : std_logic_vector( 7 downto 0) is r_eeprom_mem( 3 * 8 - 1 downto  2 * 8);    
@@ -123,7 +123,8 @@ begin
         scl       => scl
     );
     
-    mem_proc : process(clock) begin
+    
+    mem_proc : process(clock) begin   
         if rising_edge(clock) then
             registers(0) <= r_mem_reg_0;
             registers(1) <= r_mem_reg_1;
@@ -142,6 +143,7 @@ begin
     
     SM_read_registers : process(clock) 
     begin
+    
         if rising_edge(clock) then
 			if reset = '1' then
 				state <= WAITING;
@@ -150,6 +152,7 @@ begin
 			else
 
 				case state is 
+				
 					when WAITING =>
 						data_ready <= '0';
 						busy_cnt <= 0;
@@ -158,6 +161,7 @@ begin
 							state <= READ_EEPROM;
 						end if;
 						
+				    -- This step handles I2C communication with EEPROM. Writes 2 bytes of EEPROM address (which is 0), and then reads 27 bytes
 					when READ_EEPROM =>
 					
 						-- I2C master busy, means we are sending a command, and can prepare the next, or read result from previous
@@ -168,14 +172,15 @@ begin
 						
 						r_busy_cnt <= busy_cnt; 
 				
+				        
 						case r_busy_cnt is
 							when 0 =>
 								I2C_ena <= '1';             -- enable I2C master
-								I2C_addr <= control_code & address_chip; -- load chip code and chip address
-								I2C_data_wr <= "00000000";  -- address 0
+								I2C_addr <= control_code & address_chip; -- load I2C chip code and I2C address
+								I2C_data_wr <= "00000000";  -- First byte of EEPROM address (which is 0)
 								I2C_rw <= '0';              -- command: write
 							when 1 =>
-								I2C_rw <= '0';              -- write one more byte. Address still 0.
+								I2C_rw <= '0';              -- write second byte of EEPROM address (which remains as 0)
 							 
 							when 2 =>
 								I2C_rw <= '1'; -- read      -- start reading bytes consecutively 

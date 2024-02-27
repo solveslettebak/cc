@@ -1,3 +1,16 @@
+----------------------------------------------------------------------------------
+-- Company: European Spallation Source
+-- Engineer: Sølve Slettebak
+--  
+-- Module Name:    PLL_write - Behavioral
+-- Project Name:   Firmware for HQF  
+-- Target Devices: Cmod S7-25 (xc7s25csga225-1)
+-- Tool Versions:  Vivado 2023.1
+--
+-- Description: Writes one register to PLL
+-- 
+----------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 
@@ -9,10 +22,12 @@ entity PLL_write is
     );
     Port ( 
         i_clock      : in  std_logic;
-        i_data       : in  std_logic_vector(REG_WIDTH - 1 downto 0);
-        i_write_en   : in  std_logic;
         i_reset      : in  std_logic;
-        o_write_done : out std_logic;
+        i_data       : in  std_logic_vector(REG_WIDTH - 1 downto 0); -- register to write
+        i_write_en   : in  std_logic; -- Writing starts by driving this high for one clock cycle.
+        o_write_done : out std_logic; -- Goes high for one clock cycle when write is complete
+        
+        -- Signals for external PLL
         o_TX         : out std_logic;
         o_clock      : out std_logic;
         o_LE         : out std_logic
@@ -30,11 +45,11 @@ architecture Behavioral of PLL_write is
     );
     signal state : t_state := WAITING;
 
-    signal write_count : integer range 0 to REG_WIDTH - 1 := 0;
-    signal data_clock : std_logic;
+    signal write_count     : integer range 0 to REG_WIDTH - 1 := 0;
+    
+    signal data_clock      : std_logic;
     signal last_data_clock : std_logic;
-
-    signal PLL_clock : std_logic;
+    signal PLL_clock  : std_logic;
 
     signal r_data : std_logic_vector(REG_WIDTH - 1 downto 0);
     signal r_LE   : std_logic := '1';
@@ -44,6 +59,8 @@ architecture Behavioral of PLL_write is
 
 begin
 
+    -- Process to create clock for the PLL, as well as a 180 deg phase shifted data clock
+    -- used to time latching in data
     clock_gen : process(i_clock) 
     begin
         if rising_edge(i_clock) then
@@ -108,8 +125,8 @@ begin
 						if r_write_en = '1' then
 							state <= WRITING;
 							write_count <= REG_WIDTH - 1;
-							r_data <= i_data;
-							r_LE <= '0';
+							r_data <= i_data;              -- Latch in register
+							r_LE <= '0';                   -- Load Enable, active low
 						else
 						    proc_reset;
 						end if;
@@ -117,17 +134,17 @@ begin
 					when WRITING =>
 					
 						if data_clock = '1' and last_data_clock = '0' then -- rising edge of data clock
-							o_TX <= r_data(write_count);
+							o_TX <= r_data(write_count);                   -- latch output bit
 							if write_count = 0 then
 								state <= DONE;
 							else
-								write_count <= write_count - 1;
+								write_count <= write_count - 1;            -- loop until all bits written
 							end if;
 						end if;
 						
 					when DONE =>
 					
-						if data_clock = '0' and last_data_clock = '1' then -- falling edge of data clock
+						if data_clock = '0' and last_data_clock = '1' then -- wait for falling edge of data clock before finishing.
 							r_LE <= '1';
 							state <= WAITING;
 							o_write_done <= '1';

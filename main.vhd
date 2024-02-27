@@ -1,21 +1,20 @@
 ----------------------------------------------------------------------------------
--- Company: 
--- Engineer: 
--- 
--- Create Date: 11/06/2023 07:42:23 PM
--- Design Name: 
--- Module Name: main - Behavioral
--- Project Name: 
--- Target Devices: 
--- Tool Versions: 
--- Description: 
--- 
--- Dependencies: 
--- 
--- Revision:
--- Revision 0.01 - File Created
--- Additional Comments:
--- 
+-- Company: European Spallation Source
+-- Engineer: Sølve Slettebak
+--  
+-- Module Name:    main - Behavioral
+-- Project Name:   Firmware for HQF  
+-- Target Devices: Cmod S7-25 (xc7s25csga225-1)
+-- Tool Versions:  Vivado 2023.1
+--
+-- Description: Top level VHDL file for the project. Contains main state machine 
+--              for reading EEPROM, programming PLL and step attenuator, and
+--              monitoring of PLL lock and power good.
+--
+--              In the event of lost PLL lock, or lost "power good" signals, 
+--              PLL chip enable gets disabled, up/down-mixer disabled and interlock
+--              activated.
+--
 ----------------------------------------------------------------------------------
 
 library IEEE;
@@ -62,7 +61,7 @@ use work.LED_constants.all;
 
 entity main is
 Generic (
-    CLOCK_SPEED   : integer := 220_000_000; -- Hz
+    CLOCK_SPEED   : integer := 240_000_000; -- Hz
     BUS_SPEED     : integer := 100_000; -- Hz. For both PLL and EEPROM. With 10kOhm SDA/SCL pullup, this value should be 100_000 Hz.
     INIT_DELAY_us : integer := 50000; 
     REG_WIDTH     : integer := 32
@@ -73,7 +72,7 @@ Port (
     clock12MHz : in  std_logic;
     LED        : out std_logic_vector(3 downto 0);
     LED_RGB    : out std_logic_vector(2 downto 0);
-    -- i_btn1     : in std_logic;
+    i_btn1     : in std_logic;
     -- i_btn2     : in std_logic;
     
     -- External in/out
@@ -178,7 +177,7 @@ architecture Behavioral of main is
 
 -------------------------------------------
 
-    constant CLOCK_DELAY : integer := (CLOCK_SPEED/1_000_000)*INIT_DELAY_us;
+    constant CLOCK_DELAY : integer := ( CLOCK_SPEED / 1_000_000 ) * INIT_DELAY_us;
     
     type t_state is (
         INIT,              -- Initialize
@@ -187,12 +186,12 @@ architecture Behavioral of main is
         START_READ,        -- Initiate the EEPROM read. Could omit this step, but helps with timing closure.
         READ_EEPROM,       -- Read RF frequency, step attenuator settings and PLL registers from EEPROM
         CHECK,             -- Check RF frequency is 352 or 704 (also to verify good read of EEPROM)
-        STEP_ATT_PROGRAM,  -- Program step attenuator
         PLL_SETUP_NEXT,    -- Set up first/next register to write to external PLL
         WRITE_PLL,         -- Write one register. Return to PLL_SETUP_NEXT, or WAIT_FOR_LOCK if all registers are written
         WAIT_FOR_LOCK,     -- Wait for PLL lock (and verify power still good)
+        STEP_ATT_PROGRAM,  -- Program step attenuator
         MONITOR,           -- Setup is done - monitor power and PLL lock
-        ERROR              -- All errors goes here. Requires a reset signal to get out of this.
+        ERROR_STATE        -- All errors goes here. Requires a reset signal to get out of this.
     );
     signal state : t_state := INIT;
     
@@ -264,9 +263,9 @@ begin
     SM : process(clockFast) 
     
         procedure proc_reset is begin
-            delay_count <= 0;
+            delay_count   <= 0;
             r_delay_count <= 0;
-            stp_att_counter <= 0;
+            stp_att_counter   <= 0;
             r_stp_att_counter <= 0;
             LED_704  <= '0';
             LED_352  <= '0';
@@ -277,7 +276,7 @@ begin
             PLL_CE   <= '0';
             LED_RGB  <= col_BLUE;
             LED      <= "0000";
-            state <= INIT;
+            state    <= INIT;
         end procedure;
     
     begin
@@ -329,37 +328,22 @@ begin
                             when 704 =>
                                 LED_704 <= '1';
                                 LED_352 <= '0';
-                                state <= STEP_ATT_PROGRAM;
+                                state <= PLL_SETUP_NEXT;
+                                PLL_CE <= '1';
+                                reg_counter <= 0;
                             when 352 =>
                                 LED_704 <= '0';
                                 LED_352 <= '1';
-                                state <= STEP_ATT_PROGRAM;
+                                state <= PLL_SETUP_NEXT;
+                                PLL_CE <= '1';
+                                reg_counter <= 0;
                             when others =>
                                 LED_704 <= '1';
                                 LED_352 <= '1';    
-                                state <= ERROR; 
+                                state <= ERROR_STATE; 
                         end case;
-                        
-                    when STEP_ATT_PROGRAM => -- need to test this. verify it is written in the correct order, for starters.
-                        stp_att_counter <= r_stp_att_counter; 
-                        StpAtnD0 <= r_stp_att(0);
-                        StpAtnD1 <= r_stp_att(1);
-                        StpAtnD2 <= r_stp_att(2);
-                        StpAtnD3 <= r_stp_att(3);
-                        StpAtnD4 <= r_stp_att(4);
-                        StpAtnD6 <= r_stp_att(6);
-                        StpAtnD5 <= r_stp_att(5);
-                        r_stp_att_counter <= r_stp_att_counter + 1;
-                        if stp_att_counter = 1000 then -- TODO: Check datasheet for more exact timings. 1000 cycles probably fine meanwhile.
-                            StpAtnLE <= '1';
-                        elsif stp_att_counter = 2000 then
-                            StpAtnLE <= '0';
-                        elsif stp_att_counter = 3000 then
-                            state <= PLL_SETUP_NEXT;
-                            PLL_CE <= '1';
-                            reg_counter <= 0;
-                        end if;
-                        
+
+
                     when PLL_SETUP_NEXT =>
                                             
                         PLL_write_en <= '1';
@@ -385,6 +369,25 @@ begin
                         LED(3) <= '1';
 
                         if PGVA1 = '1' and PGVA2 = '1' and PGVA3 = '1' and PLL_LD = '1' and PGVFilter = '1' then
+                            state <= STEP_ATT_PROGRAM;
+                        end if;
+                        
+                    when STEP_ATT_PROGRAM => -- need to test this. verify it is written in the correct order, for starters.
+                    
+                        stp_att_counter <= r_stp_att_counter; 
+                        StpAtnD0 <= r_stp_att(0);
+                        StpAtnD1 <= r_stp_att(1);
+                        StpAtnD2 <= r_stp_att(2);
+                        StpAtnD3 <= r_stp_att(3);
+                        StpAtnD4 <= r_stp_att(4);
+                        StpAtnD6 <= r_stp_att(6);
+                        StpAtnD5 <= r_stp_att(5);
+                        r_stp_att_counter <= r_stp_att_counter + 1;
+                        if stp_att_counter = 1000 then    -- Pull LE high for 1000 clock cycles (of the fast clock)
+                            StpAtnLE <= '1';
+                        elsif stp_att_counter = 2000 then -- Then low for the same time, and now the step attenuator is programmed.
+                            StpAtnLE <= '0';
+                        elsif stp_att_counter = 3000 then
                             n_ITLCK <= '1';
                             UpMixEn <= '1';
                             DoMixEn <= '1';                    
@@ -393,19 +396,19 @@ begin
 
                     when MONITOR =>
 
-                        if PGVA1 = '0' or PGVA2 = '0' or PGVA3 = '0' or PLL_LD = '0' or PGVFilter = '0' then
+                        if PGVA1 = '0' or PGVA2 = '0' or PGVA3 = '0' or PLL_LD = '0' or PGVFilter = '0' or i_btn1 = '1' then 
                             n_ITLCK <= '0';
                             PLL_CE <= '0'; 
                             UpMixEn <= '0';
                             DoMixEn <= '0';  
-                            state <= ERROR;                  
+                            state <= ERROR_STATE;                  
                         end if;
                         
                         LED_RGB  <= col_GREEN;
                         
-                    when ERROR =>
+                    when ERROR_STATE =>
                     
-                        state <= ERROR;
+                        state <= ERROR_STATE;
                         LED_RGB <= col_RED;
                         
                 end case;
@@ -414,10 +417,3 @@ begin
         end if;
     end process SM; 
 end Behavioral;
-
-
-
-
-
-
-
