@@ -83,7 +83,7 @@ Port (
     PGVA2      : in  std_logic;
     PGVA1      : in  std_logic;
     PGVfilter  : in  std_logic;
-	
+
     LED_PLL    : out std_logic;
     LED_704    : out std_logic;
     LED_352    : out std_logic;

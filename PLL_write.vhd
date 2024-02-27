@@ -36,7 +36,7 @@ end PLL_write;
 
 architecture Behavioral of PLL_write is
 
-	constant CLOCK_DIVIDE : integer := (CLOCK_SPEED / PLL_CLOCK_SPEED) / 4;
+    constant CLOCK_DIVIDE : integer := (CLOCK_SPEED / PLL_CLOCK_SPEED) / 4;
 
     type t_state is (
         WAITING, 
@@ -69,35 +69,35 @@ begin
                 clock_count <= 0;
             else 
 
-				if r_LE = '0' then -- generate clock when load enable is low
-					last_data_clock <= data_clock;
-					if clock_count = CLOCK_DIVIDE * 4 - 1 then
-						clock_count <= 0;
-					else
-						clock_count <= clock_count + 1;
-					end if; 
-					case clock_count is
-						when 0 to CLOCK_DIVIDE - 1 =>
-							data_clock <= '1';
-							PLL_clock  <= '0';
-						when CLOCK_DIVIDE to 2 * CLOCK_DIVIDE - 1 => 
-							data_clock <= '1';
-							PLL_clock  <= '1';
-						when 2 * CLOCK_DIVIDE to 3 * CLOCK_DIVIDE - 1 =>
-							data_clock <= '0';
-							PLL_clock  <= '1';
-						when others =>
-							data_clock <= '0';
-							PLL_clock  <= '0';
-					end case;
-				else
-					data_clock <= '0';
-					last_data_clock <= '0';
-					PLL_clock  <= '0';
-					clock_count <= 0;
-				end if;
-				
-			end if;
+                if r_LE = '0' then -- generate clock when load enable is low
+                    last_data_clock <= data_clock;
+                    if clock_count = CLOCK_DIVIDE * 4 - 1 then
+                        clock_count <= 0;
+                    else
+                        clock_count <= clock_count + 1;
+                    end if; 
+                    case clock_count is
+                        when 0 to CLOCK_DIVIDE - 1 =>
+                            data_clock <= '1';
+                            PLL_clock  <= '0';
+                        when CLOCK_DIVIDE to 2 * CLOCK_DIVIDE - 1 => 
+                            data_clock <= '1';
+                            PLL_clock  <= '1';
+                        when 2 * CLOCK_DIVIDE to 3 * CLOCK_DIVIDE - 1 =>
+                            data_clock <= '0';
+                            PLL_clock  <= '1';
+                        when others =>
+                            data_clock <= '0';
+                            PLL_clock  <= '0';
+                    end case;
+                else
+                    data_clock <= '0';
+                    last_data_clock <= '0';
+                    PLL_clock  <= '0';
+                    clock_count <= 0;
+                end if;
+                
+            end if;
         end if;
     end process clock_gen;
 
@@ -112,46 +112,46 @@ begin
     begin
         if rising_edge(i_clock) then
 
-			if i_reset = '1' then
-			    proc_reset;
-			else
+            if i_reset = '1' then
+                proc_reset;
+            else
 
-				case state is
-				
-					when WAITING =>
-					    
-					    r_write_en <= i_write_en;
-					    
-						if r_write_en = '1' then
-							state <= WRITING;
-							write_count <= REG_WIDTH - 1;
-							r_data <= i_data;              -- Latch in register
-							r_LE <= '0';                   -- Load Enable, active low
-						else
-						    proc_reset;
-						end if;
-						
-					when WRITING =>
-					
-						if data_clock = '1' and last_data_clock = '0' then -- rising edge of data clock
-							o_TX <= r_data(write_count);                   -- latch output bit
-							if write_count = 0 then
-								state <= DONE;
-							else
-								write_count <= write_count - 1;            -- loop until all bits written
-							end if;
-						end if;
-						
-					when DONE =>
-					
-						if data_clock = '0' and last_data_clock = '1' then -- wait for falling edge of data clock before finishing.
-							r_LE <= '1';
-							state <= WAITING;
-							o_write_done <= '1';
-						end if;                    
-						
-				end case;
-			end if;
+                case state is
+                
+                    when WAITING =>
+                        
+                        r_write_en <= i_write_en;
+                        
+                        if r_write_en = '1' then
+                            state <= WRITING;
+                            write_count <= REG_WIDTH - 1;
+                            r_data <= i_data;              -- Latch in register
+                            r_LE <= '0';                   -- Load Enable, active low
+                        else
+                            proc_reset;
+                        end if;
+                        
+                    when WRITING =>
+                    
+                        if data_clock = '1' and last_data_clock = '0' then -- rising edge of data clock
+                            o_TX <= r_data(write_count);                   -- latch output bit
+                            if write_count = 0 then
+                                state <= DONE;
+                            else
+                                write_count <= write_count - 1;            -- loop until all bits written
+                            end if;
+                        end if;
+                        
+                    when DONE =>
+                    
+                        if data_clock = '0' and last_data_clock = '1' then -- wait for falling edge of data clock before finishing.
+                            r_LE <= '1';
+                            state <= WAITING;
+                            o_write_done <= '1';
+                        end if;                    
+                        
+                end case;
+            end if;
         end if;
     end process SM;
     
