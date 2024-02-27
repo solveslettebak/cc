@@ -18,7 +18,7 @@ set_property PULLDOWN TRUE [get_ports {DoMixEN}]
 set_property PULLDOWN TRUE [get_ports {PLL_CE}]
 
 # Push Buttons
-# set_property -dict {PACKAGE_PIN D2 IOSTANDARD LVCMOS33} [get_ports i_btn1]
+set_property -dict {PACKAGE_PIN D2 IOSTANDARD LVCMOS33} [get_ports i_btn1]
 # set_property -dict {PACKAGE_PIN D1 IOSTANDARD LVCMOS33} [get_ports i_btn2]
 
 
@@ -100,6 +100,4 @@ set_property -dict {PACKAGE_PIN A4 IOSTANDARD LVCMOS33} [get_ports StpAtnD0]
 #set_property -dict { PACKAGE_PIN J12   IOSTANDARD LVCMOS33 } [get_ports { qspi_dq[2] }]; #IO_L2P_T0_D02_14 Sch=qspi_dq[2]
 #set_property -dict { PACKAGE_PIN K13   IOSTANDARD LVCMOS33 } [get_ports { qspi_dq[3] }]; #IO_L2N_T0_D03_14 Sch=qspi_dq[3]
 
-#set_clock_groups -physically_exclusive -group [get_clocks -include_generated_clocks clock12MHz] -group [get_clocks -include_generated_clocks sys_clk_pin]
-#set_clock_groups -physically_exclusive -group [get_clocks -include_generated_clocks clkfbout_clk_wiz_0] -group [get_clocks -include_generated_clocks clkfbout_clk_wiz_0_1]
-#set_clock_groups -physically_exclusive -group [get_clocks -include_generated_clocks clk_out_clk_wiz_0] -group [get_clocks -include_generated_clocks clk_out_clk_wiz_0_1]
+
