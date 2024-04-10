@@ -61,9 +61,10 @@ use work.LED_constants.all;
 
 entity main is
 Generic (
-    CLOCK_SPEED   : integer := 240_000_000; -- Hz
+    CLOCK_SPEED   : integer := 220_000_000; -- Hz
     BUS_SPEED     : integer := 100_000; -- Hz. For both PLL and EEPROM. With 10kOhm SDA/SCL pullup, this value should be 100_000 Hz.
-    INIT_DELAY_us : integer := 50000; 
+    INIT_DELAY_us : integer := 50_000; 
+    THERM_DELAY_s : integer := 5 * 60;   -- Initial delay for thermalization
     REG_WIDTH     : integer := 32
 );
 Port (
@@ -180,6 +181,7 @@ architecture Behavioral of main is
     constant CLOCK_DELAY : integer := ( CLOCK_SPEED / 1_000_000 ) * INIT_DELAY_us;
     
     type t_state is (
+        THERMALIZE,        -- Power-up delay to thermalize the equipment. 
         INIT,              -- Initialize
         WAIT_PGVA,         -- Wait for power good signals
         DELAY,             -- Wait for INIT_DELAY_us before continuing
@@ -193,7 +195,7 @@ architecture Behavioral of main is
         MONITOR,           -- Setup is done - monitor power and PLL lock
         ERROR_STATE        -- All errors goes here. Requires a reset signal to get out of this.
     );
-    signal state : t_state := INIT;
+    signal state : t_state := THERMALIZE;
     
     signal delay_count   : integer := 0;
     signal r_delay_count : integer := 0;
@@ -202,6 +204,15 @@ architecture Behavioral of main is
     signal stp_att_counter   : integer range 0 to 8000 := 0;
     signal r_stp_att_counter : integer range 0 to 8000 := 0;
 
+    signal therm_count_sec : integer range 0 to THERM_DELAY_s := 0; 
+    signal therm_counter   : integer range 0 to CLOCK_SPEED := 0;
+    signal therm_LED       : std_logic := '1';
+    
+    signal morse_start  : std_logic := '0';
+    signal morse_done   : std_logic := '0';
+    signal morse_out    : std_logic := '0';
+    signal morse_active : std_logic := '0';
+    
 begin
 
      
@@ -253,11 +264,30 @@ begin
 
 
 -------------------------------------------------------------------
+
+    morse_asdf : entity work.morse
+    generic map (
+        g_CLOCK_SPEED => CLOCK_SPEED,
+        g_BASIC_PERIOD_ms => 85,
+        g_MORSE           => (0,0,0,0,2,0,2,0,1,0,0,2,0,1,1,0,2,1,0,1,0,1,1,2,3,2,0,0,2,1,1,2,3,2,1,2,0,1,0,2,0,1,2,0,1,1,0,2,0,1,1,0,2,0,2,1,0,0,2,3,2,0,0,2,1,0,2,3,2,0,1,2,1,0,2,3,2,0,0,1,0,2,0,1,1,0,2,1,1,0,2,0,1,2,1,0,1,0,1,1)        
+    )
+    port map (
+        clock      => clockFast,
+        reset      => '0',
+        i_start    => morse_start,
+        o_done     => morse_done,
+        o_LED      => morse_out
+    );
+
+
+-------------------------------------------------------------------
+
     
 
     --process (all) begin -- needs VHDL 2008.
     LED_PLL <= PLL_LD;
     SPARE_L <= '0';
+    
     --end process;
 
     SM : process(clockFast) 
@@ -282,12 +312,47 @@ begin
     begin
         if rising_edge(clockFast) then
             
-            if RST = '1' then
+            if (RST = '1') and (state /= THERMALIZE) then 
                 proc_reset;
             else
-
-                case state is
                 
+                case state is
+                        
+                
+                    when THERMALIZE =>
+                    
+                        LED_RGB <= col_PURPLE;
+                        LED(1)  <= therm_LED;
+                        LED_704 <= therm_LED;
+                        
+                        if morse_active = '1' then
+                            LED(0)  <= morse_out;
+                            LED_352 <= morse_out;
+                            if morse_done = '1' then
+                                morse_active <= '0';
+                            end if;
+                        else
+                            LED(0)  <= not therm_LED;
+                            LED_352 <= not therm_LED;
+                        end if;
+                        
+                        if (therm_counter < 5) and (therm_count_sec = 20) then
+                            morse_start <= '1';
+                            morse_active <= '1';
+                        else
+                            morse_start <= '0';
+                        end if;
+                        
+                        therm_counter <= therm_counter + 1;
+                        if therm_counter = CLOCK_SPEED / 2 then
+                            therm_LED <= not therm_LED;
+                            therm_counter <= 0;
+                            therm_count_sec <= therm_count_sec + 1;
+                            if therm_count_sec = THERM_DELAY_s then
+                                state <= INIT;
+                            end if;
+                        end if;
+
                     when INIT =>
                         
                         proc_reset;
@@ -296,7 +361,7 @@ begin
                     when WAIT_PGVA =>
                     
                         LED(0) <= '1';
-                    
+                                        
                         if PGVA1 = '1' and PGVA2 = '1' and PGVA3 = '1' and PGVFilter = '1' then
                             state <= DELAY;
                         end if;
